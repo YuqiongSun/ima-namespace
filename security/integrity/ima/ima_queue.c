@@ -25,17 +25,24 @@
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include "ima.h"
+#include <linux/ima_namespace.h>
 
 #define AUDIT_CAUSE_LEN_MAX 32
 
-LIST_HEAD(ima_measurements);	/* list of all measurements */
+/*
+* Modified by Yuqiong. Should use namespace specifc list of measurements
+*/
+//LIST_HEAD(ima_measurements);	/* list of all measurements */
 
 /* key: inode (before secure-hashing a file) */
+/* Moved to ima_namespace.h */
+/*
 struct ima_h_table ima_htable = {
 	.len = ATOMIC_LONG_INIT(0),
 	.violations = ATOMIC_LONG_INIT(0),
 	.queue[0 ... IMA_MEASURE_HTABLE_SIZE - 1] = HLIST_HEAD_INIT
 };
+*/
 
 /* mutex protects atomicity of extending measurement list
  * and extending the TPM PCR aggregate. Since tpm_extend can take
@@ -44,7 +51,7 @@ struct ima_h_table ima_htable = {
 static DEFINE_MUTEX(ima_extend_list_mutex);
 
 /* lookup up the digest value in the hash table, and return the entry */
-static struct ima_queue_entry *ima_lookup_digest_entry(u8 *digest_value)
+static struct ima_queue_entry *ima_lookup_digest_entry(u8 *digest_value, struct ima_namespace *ns)
 {
 	struct ima_queue_entry *qe, *ret = NULL;
 	unsigned int key;
@@ -52,7 +59,7 @@ static struct ima_queue_entry *ima_lookup_digest_entry(u8 *digest_value)
 
 	key = ima_hash_key(digest_value);
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(qe, &ima_htable.queue[key], hnext) {
+	hlist_for_each_entry_rcu(qe, &ns->ima_htable.queue[key], hnext) {
 		rc = memcmp(qe->entry->digest, digest_value, TPM_DIGEST_SIZE);
 		if (rc == 0) {
 			ret = qe;
@@ -68,7 +75,7 @@ static struct ima_queue_entry *ima_lookup_digest_entry(u8 *digest_value)
  *
  * (Called with ima_extend_list_mutex held.)
  */
-static int ima_add_digest_entry(struct ima_template_entry *entry)
+static int ima_add_digest_entry(struct ima_template_entry *entry, struct ima_namespace *ns)
 {
 	struct ima_queue_entry *qe;
 	unsigned int key;
@@ -81,13 +88,17 @@ static int ima_add_digest_entry(struct ima_template_entry *entry)
 	qe->entry = entry;
 
 	INIT_LIST_HEAD(&qe->later);
-	list_add_tail_rcu(&qe->later, &ima_measurements);
+	/*
+	*  Use namespace specifc list of measurements
+	*/
+	list_add_tail_rcu(&qe->later, get_measurements());
 
-	atomic_long_inc(&ima_htable.len);
+	atomic_long_inc(&ns->ima_htable.len);
 	key = ima_hash_key(entry->digest);
-	hlist_add_head_rcu(&qe->hnext, &ima_htable.queue[key]);
+	hlist_add_head_rcu(&qe->hnext, &ns->ima_htable.queue[key]);
 	return 0;
 }
+
 
 static int ima_pcr_extend(const u8 *hash)
 {
@@ -107,7 +118,7 @@ static int ima_pcr_extend(const u8 *hash)
  */
 int ima_add_template_entry(struct ima_template_entry *entry, int violation,
 			   const char *op, struct inode *inode,
-			   const unsigned char *filename)
+			   const unsigned char *filename, struct ima_namespace *ns)
 {
 	u8 digest[TPM_DIGEST_SIZE];
 	const char *audit_cause = "hash_added";
@@ -118,14 +129,14 @@ int ima_add_template_entry(struct ima_template_entry *entry, int violation,
 	mutex_lock(&ima_extend_list_mutex);
 	if (!violation) {
 		memcpy(digest, entry->digest, sizeof(digest));
-		if (ima_lookup_digest_entry(digest)) {
+		if (ima_lookup_digest_entry(digest, ns)) {
 			audit_cause = "hash_exists";
 			result = -EEXIST;
 			goto out;
 		}
 	}
 
-	result = ima_add_digest_entry(entry);
+	result = ima_add_digest_entry(entry, ns);
 	if (result < 0) {
 		audit_cause = "ENOMEM";
 		audit_info = 0;

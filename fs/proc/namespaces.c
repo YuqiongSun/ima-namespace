@@ -10,6 +10,9 @@
 #include <linux/user_namespace.h>
 #include "internal.h"
 
+/*
+*  Modified by Yuqiong
+*/
 
 static const struct proc_ns_operations *ns_entries[] = {
 #ifdef CONFIG_NET_NS
@@ -28,6 +31,7 @@ static const struct proc_ns_operations *ns_entries[] = {
 	&userns_operations,
 #endif
 	&mntns_operations,
+	&imans_operations,
 };
 
 static void *proc_ns_follow_link(struct dentry *dentry, struct nameidata *nd)

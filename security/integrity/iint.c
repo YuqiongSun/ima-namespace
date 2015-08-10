@@ -119,6 +119,11 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 	iint->inode = inode;
 	node = &iint->rb_node;
 	inode->i_flags |= S_IMA;
+
+	/* Modified by Yuqiong */
+	/* namespace list init */
+	INIT_LIST_HEAD(&iint->ns_list);
+
 	rb_link_node(node, parent, p);
 	rb_insert_color(node, &integrity_iint_tree);
 

@@ -24,7 +24,10 @@ extern const struct proc_ns_operations ipcns_operations;
 extern const struct proc_ns_operations pidns_operations;
 extern const struct proc_ns_operations userns_operations;
 extern const struct proc_ns_operations mntns_operations;
-
+/*
+* Modified by Yuqiong
+*/
+extern const struct proc_ns_operations imans_operations;
 /*
  * We always define these enumerators
  */
@@ -34,6 +37,10 @@ enum {
 	PROC_UTS_INIT_INO	= 0xEFFFFFFEU,
 	PROC_USER_INIT_INO	= 0xEFFFFFFDU,
 	PROC_PID_INIT_INO	= 0xEFFFFFFCU,
+	/*
+	* Modified by Yuqiong
+	*/
+	PROC_IMA_INIT_INFO	= 0xEFFFFFFBU,
 };
 
 #ifdef CONFIG_PROC_FS

@@ -13,6 +13,11 @@
  *             Pavel Emelianov <xemul@openvz.org>
  */
 
+/*
+*  Modified by Yuqiong
+*/
+
+
 #include <linux/slab.h>
 #include <linux/export.h>
 #include <linux/nsproxy.h>
@@ -25,6 +30,7 @@
 #include <linux/proc_ns.h>
 #include <linux/file.h>
 #include <linux/syscalls.h>
+#include <linux/ima_namespace.h>
 
 static struct kmem_cache *nsproxy_cachep;
 
@@ -39,6 +45,8 @@ struct nsproxy init_nsproxy = {
 #ifdef CONFIG_NET
 	.net_ns			= &init_net,
 #endif
+	// Yuqiong: should it be NULL or &init_ima_ns defined in ima_namespace.c?
+	.ima_ns			= &init_ima_ns,
 };
 
 static inline struct nsproxy *create_nsproxy(void)
@@ -98,8 +106,16 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 		goto out_net;
 	}
 
-	return new_nsp;
+	new_nsp->ima_ns = copy_ima(flags, user_ns, tsk->nsproxy->ima_ns);
+	if (IS_ERR(new_nsp->ima_ns)) {
+		err = PTR_ERR(new_nsp->ima_ns);
+		goto out_ima;
+	}
 
+	return new_nsp;
+out_ima:
+	if(new_nsp->ima_ns)
+		put_ima_ns(new_nsp->ima_ns);
 out_net:
 	if (new_nsp->pid_ns_for_children)
 		put_pid_ns(new_nsp->pid_ns_for_children);
@@ -128,7 +144,7 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	struct nsproxy *new_ns;
 
 	if (likely(!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
-			      CLONE_NEWPID | CLONE_NEWNET)))) {
+			      CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWIMA)))) {
 		get_nsproxy(old_ns);
 		return 0;
 	}
@@ -147,6 +163,7 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 		(CLONE_NEWIPC | CLONE_SYSVSEM)) 
 		return -EINVAL;
 
+	printk(KERN_DEBUG "SYQ: %s, creating IMA namespace %d \n",__FUNCTION__, flags | CLONE_NEWIMA);
 	new_ns = create_new_namespaces(flags, tsk, user_ns, tsk->fs);
 	if (IS_ERR(new_ns))
 		return  PTR_ERR(new_ns);
@@ -165,6 +182,8 @@ void free_nsproxy(struct nsproxy *ns)
 		put_ipc_ns(ns->ipc_ns);
 	if (ns->pid_ns_for_children)
 		put_pid_ns(ns->pid_ns_for_children);
+	if (ns->ima_ns)
+		put_ima_ns(ns->ima_ns);
 	put_net(ns->net_ns);
 	kmem_cache_free(nsproxy_cachep, ns);
 }

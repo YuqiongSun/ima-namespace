@@ -10,6 +10,9 @@ struct ipc_namespace;
 struct pid_namespace;
 struct fs_struct;
 
+/* Modified by Yuqiong for IMA namespace*/
+struct ima_namespace;
+
 /*
  * A structure to contain pointers to all per-process
  * namespaces - fs (mount), uts, network, sysvipc, etc.
@@ -33,6 +36,7 @@ struct nsproxy {
 	struct mnt_namespace *mnt_ns;
 	struct pid_namespace *pid_ns_for_children;
 	struct net 	     *net_ns;
+	struct ima_namespace *ima_ns;
 };
 extern struct nsproxy init_nsproxy;
 

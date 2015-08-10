@@ -106,6 +106,7 @@ struct integrity_iint_cache {
 	struct inode *inode;	/* back pointer to inode in question */
 	u64 version;		/* track inode changes */
 	unsigned long flags;
+	struct list_head ns_list; /* list head for all namespaces */
 	enum integrity_status ima_file_status:4;
 	enum integrity_status ima_mmap_status:4;
 	enum integrity_status ima_bprm_status:4;
@@ -114,6 +115,7 @@ struct integrity_iint_cache {
 	enum integrity_status evm_status:4;
 	struct ima_digest_data *ima_hash;
 };
+
 
 /* rbtree tree calls to lookup, insert, delete
  * integrity data associated with an inode.

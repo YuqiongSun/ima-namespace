@@ -8,7 +8,6 @@
 #include <linux/slab.h>
 #include <linux/user_namespace.h>
 #include <linux/proc_ns.h>
-#include <linux/rculist.h>
 
 extern struct list_head ima_default_rules;
 
@@ -23,8 +22,15 @@ struct ima_namespace init_ima_ns = {
 	.ima_measurements = LIST_HEAD_INIT(init_ima_ns.ima_measurements),
 	.ima_rules = &ima_default_rules,
 	.ima_policy_rules = LIST_HEAD_INIT(init_ima_ns.ima_policy_rules),
+	.iint_list = LIST_HEAD_INIT(init_ima_ns.iint_list),
 	.nr_extents = 0,
 	.ima_fs_flags = 0,
+	.ima_policy_flag = 0,
+	.ima_htable = {
+		.len = ATOMIC_LONG_INIT(0),
+		.violations = ATOMIC_LONG_INIT(0),
+		.queue[0 ... IMA_MEASURE_HTABLE_SIZE - 1] = HLIST_HEAD_INIT,
+	},
 };
 EXPORT_SYMBOL(init_ima_ns);
 
@@ -44,6 +50,7 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 {
         struct ima_namespace *ns;
         int err;
+	int i;
 
         ns = create_ima_ns();
         if (!ns)
@@ -56,14 +63,23 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
         }
 
         ns->ns.ops = &imans_operations;
+	/* parent ref count increase by 1 */
 	get_ima_ns(old_ns);
 	ns->parent = old_ns;
         ns->user_ns = get_user_ns(user_ns);
 	INIT_LIST_HEAD(&ns->ima_measurements);       
 	INIT_LIST_HEAD(&ns->ima_policy_rules);
-	/*
-	* ima_create_policy_file(ns); 
-        */
+	INIT_LIST_HEAD(&ns->iint_list);
+	ns->ima_rules = &ima_default_rules,
+	ns->nr_extents = 0;
+	ns->ima_fs_flags = 0;
+
+	atomic_long_set(&ns->ima_htable.len, 0);
+	atomic_long_set(&ns->ima_htable.violations, 0);
+	//ns->ima_htable.queue[0 ... IMA_MEASURE_HTABLE_SIZE - 1] = HLIST_HEAD_INIT;
+	for (i=0; i<IMA_MEASURE_HTABLE_SIZE; i++)
+		INIT_HLIST_HEAD(&ns->ima_htable.queue[i]);
+	ima_update_policy_flag(ns);	
 	return ns;
 }
 
@@ -86,11 +102,8 @@ struct ima_namespace *copy_ima(unsigned long flags,
         return new_ns;
 }
 
-void free_ima_ns(struct kref *kref)
+static void destroy_ima_ns(struct ima_namespace *ns)
 {
-        struct ima_namespace *ns;
-
-        ns = container_of(kref, struct ima_namespace, kref);
         put_user_ns(ns->user_ns);
         ns_free_inum(&ns->ns);
         /*
@@ -99,7 +112,23 @@ void free_ima_ns(struct kref *kref)
 	printk(KERN_DEBUG "SYQ: %s, freeing ima queue entries\n", __FUNCTION__);
 	ima_delete_rules(&ns->ima_policy_rules);
 	ima_free_queue_entries(ns);
+	ima_free_ns_status(ns);
 	kfree(ns);
+}
+
+void free_ima_ns(struct kref *kref)
+{
+        struct ima_namespace *ns;
+	struct ima_namespace *parent;
+
+        ns = container_of(kref, struct ima_namespace, kref);
+	while (ns != &init_ima_ns)
+	{
+		parent = ns->parent;
+		destroy_ima_ns(ns);
+		put_ima_ns(parent);
+		ns = parent;
+	}
 }
 
 static inline struct ima_namespace *to_ima_ns(struct ns_common *ns)

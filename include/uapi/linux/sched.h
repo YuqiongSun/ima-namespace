@@ -30,6 +30,9 @@
 #define CLONE_NEWNET		0x40000000	/* New network namespace */
 #define CLONE_IO		0x80000000	/* Clone io context */
 
+/* Added by Yuqiong. Use 0x02000000 for the ima namespace */
+#define CLONE_NEWIMA		0x02000000	/* New ima namespace */
+
 /*
  * Scheduling policies
  */

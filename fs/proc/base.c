@@ -94,6 +94,9 @@
 #include "internal.h"
 #include "fd.h"
 
+/* Modified by Yuqiong */
+#include <linux/ima_namespace.h>
+
 /* NOTE:
  *	Implementing inode permission operations in /proc is almost
  *	certainly an error.  Permission checks need to happen during
@@ -2430,6 +2433,70 @@ err:
 	return ret;
 }
 
+/* Modified by Yuqiong 
+* ima policy open
+*/
+static int proc_ima_policy_open(struct inode *inode, struct file *file)
+{
+	struct ima_namespace *ns = NULL;
+	struct task_struct *task;
+	struct seq_file *seq;
+	int ret = -EINVAL;
+
+
+	task = get_proc_task(inode);
+	if (task) {
+		rcu_read_lock();
+		ns = task->nsproxy->ima_ns;
+		get_ima_ns(ns);
+		rcu_read_unlock();
+		put_task_struct(task);
+	}
+	if (!ns)
+		goto err;
+
+	/* Temporary hack, be nice to do a seq read/write of policy data */
+	ret = seq_open(file, NULL);
+	if(ret)
+		goto err_put_ns;
+
+	seq = file->private_data;
+	seq->private = ns;
+
+	ret = ima_open_policy(inode, file, ns);
+	//printk(KERN_DEBUG "SYQ: %s, open ret is %d\n", __FUNCTION__, ret);
+	return ret;
+err_put_ns:
+	put_ima_ns(ns);
+err:
+	return ret;
+}
+
+static ssize_t proc_ima_policy_write(struct file *file, const char __user *buf,
+				size_t size, loff_t *ppos)
+{
+	struct seq_file *seq = file->private_data;
+	struct ima_namespace *ns = seq->private;
+	int ret = -EINVAL;
+	ret = ima_write_policy(file, buf, size, ppos, ns);
+	printk(KERN_DEBUG "SYQ: %s, write ret is %d\n", __FUNCTION__, ret);
+
+	return ret;
+}
+
+static int proc_ima_policy_release(struct inode *inode, struct file *file)
+{
+	struct seq_file *seq = file->private_data;
+	struct ima_namespace *ns = seq->private;
+	int ret = -EINVAL;	
+
+	ima_release_policy(inode, file, ns);
+	put_ima_ns(ns);
+	ret = seq_release(inode, file);
+	printk(KERN_DEBUG "SYQ: %s, release ret is %d\n", __FUNCTION__, ret);
+	return ret;
+}
+
 static int proc_id_map_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq = file->private_data;
@@ -2459,6 +2526,14 @@ static const struct file_operations proc_uid_map_operations = {
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= proc_id_map_release,
+};
+
+/* Modifified by Yuqiong: ima policy operations */
+static const struct file_operations proc_ima_policy_operations = {
+	.open		= proc_ima_policy_open,
+	.write		= proc_ima_policy_write,
+	.llseek		= generic_file_llseek,
+	.release	= proc_ima_policy_release,
 };
 
 static const struct file_operations proc_gid_map_operations = {
@@ -2637,6 +2712,12 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("projid_map", S_IRUGO|S_IWUSR, proc_projid_map_operations),
 	REG("setgroups",  S_IRUGO|S_IWUSR, proc_setgroups_operations),
 #endif
+/*
+* Modified by Yuqiong to support IMA policy
+* IMA policy is writable to the owner, not readable
+* IMA policy can only be written once, and only be be written to exactly one process within the namespace
+*/
+	REG("ima_policy",    S_IWUSR, proc_ima_policy_operations),
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	REG("timers",	  S_IRUGO, proc_timers_operations),
 #endif

@@ -20,6 +20,9 @@
 
 #include "ima.h"
 
+/* Modified by Yuqiong*/
+#include <linux/ima_namespace.h>
+
 /* flags definitions */
 #define IMA_FUNC	0x0001
 #define IMA_MASK	0x0002
@@ -35,7 +38,10 @@
 #define DONT_APPRAISE	0x0008
 #define AUDIT		0x0040
 
-int ima_policy_flag;
+/*
+* need to be namespaced
+*int ima_policy_flag;
+*/
 
 #define MAX_LSM_RULES 6
 enum lsm_rule_types { LSM_OBJ_USER, LSM_OBJ_ROLE, LSM_OBJ_TYPE,
@@ -113,9 +119,15 @@ static struct ima_rule_entry default_appraise_rules[] = {
 #endif
 };
 
-static LIST_HEAD(ima_default_rules);
-static LIST_HEAD(ima_policy_rules);
-static struct list_head *ima_rules;
+/*
+Modified by Yuqiong: globally visible
+*/
+LIST_HEAD(ima_default_rules);
+/*
+* Yuqiong: inited within namespace
+*static LIST_HEAD(ima_policy_rules);
+*static struct list_head *ima_rules;
+*/
 
 static DEFINE_MUTEX(ima_rules_mutex);
 
@@ -150,7 +162,7 @@ static void ima_lsm_update_rules(void)
 	int i;
 
 	mutex_lock(&ima_rules_mutex);
-	list_for_each_entry_safe(entry, tmp, &ima_policy_rules, list) {
+	list_for_each_entry_safe(entry, tmp, get_current_ima_policy_rules(), list) {
 		for (i = 0; i < MAX_LSM_RULES; i++) {
 			if (!entry->lsm[i].rule)
 				continue;
@@ -174,11 +186,12 @@ static void ima_lsm_update_rules(void)
  * Returns true on rule match, false on failure.
  */
 static bool ima_match_rules(struct ima_rule_entry *rule,
-			    struct inode *inode, enum ima_hooks func, int mask)
+			    struct inode *inode, enum ima_hooks func, int mask, struct user_namespace *user_ns)
 {
 	struct task_struct *tsk = current;
 	const struct cred *cred = current_cred();
 	int i;
+
 
 	if ((rule->flags & IMA_FUNC) &&
 	    (rule->func != func && func != POST_SETATTR))
@@ -192,8 +205,15 @@ static bool ima_match_rules(struct ima_rule_entry *rule,
 	if ((rule->flags & IMA_FSUUID) &&
 	    memcmp(rule->fsuuid, inode->i_sb->s_uuid, sizeof(rule->fsuuid)))
 		return false;
+	/* Modified by Yuqiong */
+	/* compare with euid within the user namespace */
+	#ifdef CONFIG_USER_NS
+	if ((rule->flags & IMA_UID) && !uid_eq(rule->uid, KUIDT_INIT(from_kuid_munged(user_ns, cred->uid))))
+		return false;
+	#else
 	if ((rule->flags & IMA_UID) && !uid_eq(rule->uid, cred->uid))
 		return false;
+	#endif /* CONFIG_USER_NS */
 	if ((rule->flags & IMA_FOWNER) && !uid_eq(rule->fowner, inode->i_uid))
 		return false;
 	for (i = 0; i < MAX_LSM_RULES; i++) {
@@ -276,19 +296,19 @@ static int get_subaction(struct ima_rule_entry *rule, int func)
  * change.)
  */
 int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
-		     int flags)
+		     int flags, struct user_namespace *user_ns)
 {
 	struct ima_rule_entry *entry;
 	int action = 0, actmask = flags | (flags << 1);
 
-	list_for_each_entry(entry, ima_rules, list) {
+	list_for_each_entry(entry, *get_current_ima_rules(), list) {
 
 		if (!(entry->action & actmask))
 			continue;
 
-		if (!ima_match_rules(entry, inode, func, mask))
+		if (!ima_match_rules(entry, inode, func, mask, user_ns))
 			continue;
-
+		
 		action |= entry->flags & IMA_ACTION_FLAGS;
 
 		action |= entry->action & IMA_DO_MASK;
@@ -313,18 +333,18 @@ int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
  * out of a function or not call the function in the first place
  * can be made earlier.
  */
-void ima_update_policy_flag(void)
+void ima_update_policy_flag(struct ima_namespace *ns)
 {
 	struct ima_rule_entry *entry;
 
-	ima_policy_flag = 0;
-	list_for_each_entry(entry, ima_rules, list) {
+	ns->ima_policy_flag = 0;
+	list_for_each_entry(entry, *get_ima_rules(ns), list) {
 		if (entry->action & IMA_DO_MASK)
-			ima_policy_flag |= entry->action;
+			ns->ima_policy_flag |= entry->action;
 	}
 
 	if (!ima_appraise)
-		ima_policy_flag &= ~IMA_APPRAISE;
+		ns->ima_policy_flag &= ~IMA_APPRAISE;
 }
 
 /**
@@ -350,7 +370,8 @@ void __init ima_init_policy(void)
 			      &ima_default_rules);
 	}
 
-	ima_rules = &ima_default_rules;
+	/* This function is only called from the native ima namespace */
+	init_ima_ns.ima_rules = &ima_default_rules;
 }
 
 /**
@@ -360,10 +381,11 @@ void __init ima_init_policy(void)
  * policy.  Once updated, the policy is locked, no additional rules can be
  * added to the policy.
  */
-void ima_update_policy(void)
+void ima_update_policy(struct ima_namespace *ns)
 {
-	ima_rules = &ima_policy_rules;
-	ima_update_policy_flag();
+	struct list_head **ima_rules = get_ima_rules(ns);
+	*ima_rules = get_ima_policy_rules(ns);
+	ima_update_policy_flag(ns);
 }
 
 enum {
@@ -669,11 +691,11 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 /**
  * ima_parse_add_rule - add a rule to ima_policy_rules
  * @rule - ima measurement policy rule
- *
+ * @ns	- ima namespace
  * Uses a mutex to protect the policy list from multiple concurrent writers.
  * Returns the length of the rule parsed, an error code on failure
  */
-ssize_t ima_parse_add_rule(char *rule)
+ssize_t ima_parse_add_rule(char *rule, struct ima_namespace *ns)
 {
 	static const char op[] = "update_policy";
 	char *p;
@@ -707,20 +729,26 @@ ssize_t ima_parse_add_rule(char *rule)
 	}
 
 	mutex_lock(&ima_rules_mutex);
-	list_add_tail(&entry->list, &ima_policy_rules);
+	list_add_tail(&entry->list, get_ima_policy_rules(ns));
 	mutex_unlock(&ima_rules_mutex);
+
+	/* Policy can be written only once */
+	ns->nr_extents = 1;
 
 	return len;
 }
 
 /* ima_delete_rules called to cleanup invalid policy */
-void ima_delete_rules(void)
+/*
+*  Modified by Yuqiong to clean up policy rules after namespace exits
+*/
+void ima_delete_rules(struct list_head *ima_policy_rules)
 {
 	struct ima_rule_entry *entry, *tmp;
 	int i;
 
 	mutex_lock(&ima_rules_mutex);
-	list_for_each_entry_safe(entry, tmp, &ima_policy_rules, list) {
+	list_for_each_entry_safe(entry, tmp, ima_policy_rules, list) {
 		for (i = 0; i < MAX_LSM_RULES; i++)
 			kfree(entry->lsm[i].args_p);
 

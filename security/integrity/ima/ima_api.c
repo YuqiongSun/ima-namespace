@@ -1,7 +1,9 @@
 /*
  * Copyright (C) 2008 IBM Corporation
  *
- * Author: Mimi Zohar <zohar@us.ibm.com>
+ * Authors: 
+ * Mimi Zohar <zohar@us.ibm.com>
+ * Yuqiong Sun <suny@us.ibm.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,6 +24,11 @@
 #include "ima.h"
 
 /*
+* Modified by Yuqiong
+*/
+#include <linux/ima_namespace.h>
+
+/*
  * ima_free_template_entry - free an existing template entry
  */
 void ima_free_template_entry(struct ima_template_entry *entry)
@@ -32,6 +39,38 @@ void ima_free_template_entry(struct ima_template_entry *entry)
 		kfree(entry->template_data[i].data);
 
 	kfree(entry);
+}
+
+/*
+*  ima_free_queue_entries - free an existing measurement list
+*  added by Yuqiong
+*/
+
+void ima_free_queue_entries(struct ima_namespace *ns)
+{
+	struct ima_queue_entry *current_qe;
+	struct ima_queue_entry *next_qe;
+	struct hlist_node *node;
+	int i;
+
+	/* No more extensions to the list, so no lock? */
+
+	/* Delete entries from htable*/	
+	for (i=0; i<IMA_MEASURE_HTABLE_SIZE; i++)
+	{
+		hlist_for_each_entry_safe(current_qe, node, &ns->ima_htable.queue[i], hnext){
+			hlist_del(&current_qe->hnext);
+		}
+		//printk(KERN_DEBUG "SYQ: %s, freeing ima_htable.queue[%d]\n", __FUNCTION__, i);
+	}	
+
+	/* Delete entries from measurement list and free entries */
+	list_for_each_entry_safe(current_qe, next_qe, &ns->ima_measurements, later){
+		//printk(KERN_DEBUG "SYQ: %s, freeing entry %s\n", __FUNCTION__, current_qe->entry->digest);
+		list_del(&current_qe->later);
+		ima_free_template_entry(current_qe->entry);
+		kfree(current_qe);
+	}
 }
 
 /*
@@ -87,7 +126,7 @@ out:
  */
 int ima_store_template(struct ima_template_entry *entry,
 		       int violation, struct inode *inode,
-		       const unsigned char *filename)
+		       const unsigned char *filename, struct ima_namespace *ns)
 {
 	static const char op[] = "add_template_measure";
 	static const char audit_cause[] = "hashing_error";
@@ -114,7 +153,7 @@ int ima_store_template(struct ima_template_entry *entry,
 		}
 		memcpy(entry->digest, hash.hdr.digest, hash.hdr.length);
 	}
-	result = ima_add_template_entry(entry, violation, op, inode, filename);
+	result = ima_add_template_entry(entry, violation, op, inode, filename, ns);
 	return result;
 }
 
@@ -127,7 +166,7 @@ int ima_store_template(struct ima_template_entry *entry,
  */
 void ima_add_violation(struct file *file, const unsigned char *filename,
 		       struct integrity_iint_cache *iint,
-		       const char *op, const char *cause)
+		       const char *op, const char *cause, struct ima_namespace *ns)
 {
 	struct ima_template_entry *entry;
 	struct inode *inode = file_inode(file);
@@ -137,14 +176,14 @@ void ima_add_violation(struct file *file, const unsigned char *filename,
 	int result;
 
 	/* can overflow, only indicator */
-	atomic_long_inc(&ima_htable.violations);
+	atomic_long_inc(&ns->ima_htable.violations);
 
 	result = ima_alloc_init_template(&event_data, &entry);
 	if (result < 0) {
 		result = -ENOMEM;
 		goto err_out;
 	}
-	result = ima_store_template(entry, violation, inode, filename);
+	result = ima_store_template(entry, violation, inode, filename, ns);
 	if (result < 0)
 		ima_free_template_entry(entry);
 err_out:
@@ -157,6 +196,7 @@ err_out:
  * @inode: pointer to inode to measure
  * @mask: contains the permission mask (MAY_READ, MAY_WRITE, MAY_EXECUTE)
  * @function: calling function (FILE_CHECK, BPRM_CHECK, MMAP_CHECK, MODULE_CHECK)
+ * @ns: current ima namespace
  *
  * The policy is defined in terms of keypairs:
  *		subj=, obj=, type=, func=, mask=, fsmagic=
@@ -168,13 +208,13 @@ err_out:
  * Returns IMA_MEASURE, IMA_APPRAISE mask.
  *
  */
-int ima_get_action(struct inode *inode, int mask, int function)
+int ima_get_action(struct inode *inode, int mask, int function, struct ima_namespace *ns)
 {
 	int flags = IMA_MEASURE | IMA_AUDIT | IMA_APPRAISE;
 
-	flags &= ima_policy_flag;
+	flags &= ns->ima_policy_flag;
 
-	return ima_match_policy(inode, function, mask, flags);
+	return ima_match_policy(inode, function, mask, flags, ns->user_ns);
 }
 
 /*
@@ -259,7 +299,7 @@ out:
 void ima_store_measurement(struct integrity_iint_cache *iint,
 			   struct file *file, const unsigned char *filename,
 			   struct evm_ima_xattr_data *xattr_value,
-			   int xattr_len)
+			   int xattr_len, struct ima_namespace *ns, struct ns_status *status)
 {
 	static const char op[] = "add_template_measure";
 	static const char audit_cause[] = "ENOMEM";
@@ -270,7 +310,7 @@ void ima_store_measurement(struct integrity_iint_cache *iint,
 					    xattr_len, NULL};
 	int violation = 0;
 
-	if (iint->flags & IMA_MEASURED)
+	if (status->flags & IMA_MEASURED)
 		return;
 
 	result = ima_alloc_init_template(&event_data, &entry);
@@ -280,15 +320,15 @@ void ima_store_measurement(struct integrity_iint_cache *iint,
 		return;
 	}
 
-	result = ima_store_template(entry, violation, inode, filename);
+	result = ima_store_template(entry, violation, inode, filename, ns);
 	if (!result || result == -EEXIST)
-		iint->flags |= IMA_MEASURED;
+		status->flags |= IMA_MEASURED;
 	if (result < 0)
 		ima_free_template_entry(entry);
 }
 
 void ima_audit_measurement(struct integrity_iint_cache *iint,
-			   const unsigned char *filename)
+			   const unsigned char *filename, struct ns_status *status)
 {
 	struct audit_buffer *ab;
 	char hash[(iint->ima_hash->length * 2) + 1];
@@ -296,7 +336,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	char algo_hash[sizeof(hash) + strlen(algo_name) + 2];
 	int i;
 
-	if (iint->flags & IMA_AUDITED)
+	if (status->flags & IMA_AUDITED)
 		return;
 
 	for (i = 0; i < iint->ima_hash->length; i++)
@@ -317,7 +357,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	audit_log_task_info(ab, current);
 	audit_log_end(ab);
 
-	iint->flags |= IMA_AUDITED;
+	status->flags |= IMA_AUDITED;
 }
 
 const char *ima_d_path(struct path *path, char **pathbuf)
@@ -335,3 +375,16 @@ const char *ima_d_path(struct path *path, char **pathbuf)
 	}
 	return pathname ?: (const char *)path->dentry->d_name.name;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

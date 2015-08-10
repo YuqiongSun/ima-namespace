@@ -25,6 +25,8 @@
 
 #include "ima.h"
 
+#include <linux/ima_namespace.h>
+
 static int valid_policy = 1;
 #define TMPBUFLEN 12
 static ssize_t ima_show_htable_value(char __user *buf, size_t count,
@@ -41,7 +43,8 @@ static ssize_t ima_show_htable_violations(struct file *filp,
 					  char __user *buf,
 					  size_t count, loff_t *ppos)
 {
-	return ima_show_htable_value(buf, count, ppos, &ima_htable.violations);
+	struct ima_namespace *ns = get_current_ns();
+	return ima_show_htable_value(buf, count, ppos, &ns->ima_htable.violations);
 }
 
 static const struct file_operations ima_htable_violations_ops = {
@@ -53,7 +56,8 @@ static ssize_t ima_show_measurements_count(struct file *filp,
 					   char __user *buf,
 					   size_t count, loff_t *ppos)
 {
-	return ima_show_htable_value(buf, count, ppos, &ima_htable.len);
+	struct ima_namespace *ns = get_current_ns();
+	return ima_show_htable_value(buf, count, ppos, &ns->ima_htable.len);
 
 }
 
@@ -70,7 +74,7 @@ static void *ima_measurements_start(struct seq_file *m, loff_t *pos)
 
 	/* we need a lock since pos could point beyond last element */
 	rcu_read_lock();
-	list_for_each_entry_rcu(qe, &ima_measurements, later) {
+	list_for_each_entry_rcu(qe, get_measurements(), later) {
 		if (!l--) {
 			rcu_read_unlock();
 			return qe;
@@ -92,7 +96,7 @@ static void *ima_measurements_next(struct seq_file *m, void *v, loff_t *pos)
 	rcu_read_unlock();
 	(*pos)++;
 
-	return (&qe->later == &ima_measurements) ? NULL : qe;
+	return (&qe->later == get_measurements()) ? NULL : qe;
 }
 
 static void ima_measurements_stop(struct seq_file *m, void *v)
@@ -256,8 +260,9 @@ static const struct file_operations ima_ascii_measurements_ops = {
 	.release = seq_release,
 };
 
-static ssize_t ima_write_policy(struct file *file, const char __user *buf,
-				size_t datalen, loff_t *ppos)
+
+ssize_t ima_write_policy(struct file *file, const char __user *buf,
+				size_t datalen, loff_t *ppos, struct ima_namespace *ns)
 {
 	char *data = NULL;
 	ssize_t result;
@@ -281,7 +286,7 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 	if (copy_from_user(data, buf, datalen))
 		goto out;
 
-	result = ima_parse_add_rule(data);
+	result = ima_parse_add_rule(data, ns);
 out:
 	if (result < 0)
 		valid_policy = 0;
@@ -294,23 +299,20 @@ static struct dentry *binary_runtime_measurements;
 static struct dentry *ascii_runtime_measurements;
 static struct dentry *runtime_measurements_count;
 static struct dentry *violations;
-static struct dentry *ima_policy;
-
-enum ima_fs_flags {
-	IMA_FS_BUSY,
-};
-
-static unsigned long ima_fs_flags;
+//static struct dentry *ima_policy;
 
 /*
  * ima_open_policy: sequentialize access to the policy file
  */
-static int ima_open_policy(struct inode *inode, struct file *filp)
+int ima_open_policy(struct inode *inode, struct file *filp, struct ima_namespace *ns)
 {
 	/* No point in being allowed to open it if you aren't going to write */
 	if (!(filp->f_flags & O_WRONLY))
 		return -EACCES;
-	if (test_and_set_bit(IMA_FS_BUSY, &ima_fs_flags))
+	/* policy can only be written once */
+	if (ns->nr_extents != 0)
+		return -EPERM;
+	if (test_and_set_bit(IMA_FS_BUSY, &ns->ima_fs_flags))
 		return -EBUSY;
 	return 0;
 }
@@ -322,32 +324,34 @@ static int ima_open_policy(struct inode *inode, struct file *filp)
  * point to the new policy rules, and remove the securityfs policy file,
  * assuming a valid policy.
  */
-static int ima_release_policy(struct inode *inode, struct file *file)
+int ima_release_policy(struct inode *inode, struct file *file, struct ima_namespace *ns)
 {
-	const char *cause = valid_policy ? "completed" : "failed";
+	const char *cause = ns->nr_extents ? "completed" : "failed";
 
 	pr_info("IMA: policy update %s\n", cause);
 	integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL, NULL,
 			    "policy_update", cause, !valid_policy, 0);
 
-	if (!valid_policy) {
-		ima_delete_rules();
-		valid_policy = 1;
-		clear_bit(IMA_FS_BUSY, &ima_fs_flags);
+	if (!ns->nr_extents) {
+		ima_delete_rules(get_ima_policy_rules(ns));
+		ns->nr_extents = 0;
+		clear_bit(IMA_FS_BUSY, &ns->ima_fs_flags);
 		return 0;
 	}
-	ima_update_policy();
-	securityfs_remove(ima_policy);
-	ima_policy = NULL;
+	ima_update_policy(ns);
+	//securityfs_remove(ima_policy);
+	//ima_policy = NULL;
 	return 0;
 }
 
-static const struct file_operations ima_measure_policy_ops = {
+/*
+const struct file_operations ima_measure_policy_ops = {
 	.open = ima_open_policy,
 	.write = ima_write_policy,
 	.release = ima_release_policy,
 	.llseek = generic_file_llseek,
 };
+*/
 
 int __init ima_fs_init(void)
 {
@@ -362,9 +366,13 @@ int __init ima_fs_init(void)
 	if (IS_ERR(binary_runtime_measurements))
 		goto out;
 
+	/*
+	*  Temporary fix
+	*  Modified by Yuqiong to allow everyone to read this file
+	*/
 	ascii_runtime_measurements =
 	    securityfs_create_file("ascii_runtime_measurements",
-				   S_IRUSR | S_IRGRP, ima_dir, NULL,
+				   S_IROTH | S_IRGRP, ima_dir, NULL,
 				   &ima_ascii_measurements_ops);
 	if (IS_ERR(ascii_runtime_measurements))
 		goto out;
@@ -382,12 +390,14 @@ int __init ima_fs_init(void)
 	if (IS_ERR(violations))
 		goto out;
 
+/*
 	ima_policy = securityfs_create_file("policy",
 					    S_IWUSR,
 					    ima_dir, NULL,
 					    &ima_measure_policy_ops);
 	if (IS_ERR(ima_policy))
 		goto out;
+*/
 
 	return 0;
 out:
@@ -396,6 +406,6 @@ out:
 	securityfs_remove(ascii_runtime_measurements);
 	securityfs_remove(binary_runtime_measurements);
 	securityfs_remove(ima_dir);
-	securityfs_remove(ima_policy);
+	//securityfs_remove(ima_policy);
 	return -1;
 }

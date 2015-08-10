@@ -19,6 +19,8 @@
 
 #include "ima.h"
 
+#include <linux/ima_namespace.h>
+
 static int __init default_appraise_setup(char *str)
 {
 	if (strncmp(str, "off", 3) == 0)
@@ -37,12 +39,12 @@ __setup("ima_appraise=", default_appraise_setup);
  *
  * Return 1 to appraise
  */
-int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func)
+int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func, struct user_namespace *user_ns)
 {
 	if (!ima_appraise)
 		return 0;
 
-	return ima_match_policy(inode, func, mask, IMA_APPRAISE);
+	return ima_match_policy(inode, func, mask, IMA_APPRAISE, user_ns);
 }
 
 static int ima_fix_xattr(struct dentry *dentry,
@@ -318,11 +320,12 @@ void ima_inode_post_setattr(struct dentry *dentry)
 	struct integrity_iint_cache *iint;
 	int must_appraise, rc;
 
-	if (!(ima_policy_flag & IMA_APPRAISE) || !S_ISREG(inode->i_mode)
+	if (!(init_ima_ns.ima_policy_flag & IMA_APPRAISE) || !S_ISREG(inode->i_mode)
 	    || !inode->i_op->removexattr)
 		return;
 
-	must_appraise = ima_must_appraise(inode, MAY_ACCESS, POST_SETATTR);
+	/* Modified by Yuqiong: temporary fix for appraise */
+	must_appraise = ima_must_appraise(inode, MAY_ACCESS, POST_SETATTR, current_user_ns());
 	iint = integrity_iint_find(inode);
 	if (iint) {
 		iint->flags &= ~(IMA_APPRAISE | IMA_APPRAISED |
@@ -356,7 +359,7 @@ static void ima_reset_appraise_flags(struct inode *inode, int digsig)
 {
 	struct integrity_iint_cache *iint;
 
-	if (!(ima_policy_flag & IMA_APPRAISE) || !S_ISREG(inode->i_mode))
+	if (!(init_ima_ns.ima_policy_flag & IMA_APPRAISE) || !S_ISREG(inode->i_mode))
 		return;
 
 	iint = integrity_iint_find(inode);
