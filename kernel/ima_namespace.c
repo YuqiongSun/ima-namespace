@@ -18,6 +18,7 @@ struct ima_namespace init_ima_ns = {
 	},
 	.user_ns = &init_user_ns,
 	.ns.inum = PROC_IMA_INIT_INFO,
+	.ns.ops = &imans_operations,
 	.parent = NULL,
 	.ima_measurements = LIST_HEAD_INIT(init_ima_ns.ima_measurements),
 	.ima_rules = &ima_default_rules,
