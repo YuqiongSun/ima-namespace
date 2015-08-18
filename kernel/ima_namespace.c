@@ -68,6 +68,7 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 	get_ima_ns(old_ns);
 	ns->parent = old_ns;
         ns->user_ns = get_user_ns(user_ns);
+	ns->ns.ops = &imans_operations;
 	INIT_LIST_HEAD(&ns->ima_measurements);       
 	INIT_LIST_HEAD(&ns->ima_policy_rules);
 	INIT_LIST_HEAD(&ns->iint_list);

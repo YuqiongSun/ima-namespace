@@ -31,7 +31,9 @@ static const struct proc_ns_operations *ns_entries[] = {
 	&userns_operations,
 #endif
 	&mntns_operations,
+#ifdef CONFIG_IMA_NS
 	&imans_operations,
+#endif
 };
 
 static void *proc_ns_follow_link(struct dentry *dentry, struct nameidata *nd)

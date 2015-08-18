@@ -91,7 +91,7 @@ static int ima_add_digest_entry(struct ima_template_entry *entry, struct ima_nam
 	/*
 	*  Use namespace specifc list of measurements
 	*/
-	list_add_tail_rcu(&qe->later, get_measurements());
+	list_add_tail_rcu(&qe->later, get_measurements(ns));
 
 	atomic_long_inc(&ns->ima_htable.len);
 	key = ima_hash_key(entry->digest);

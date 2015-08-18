@@ -39,12 +39,12 @@ __setup("ima_appraise=", default_appraise_setup);
  *
  * Return 1 to appraise
  */
-int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func, struct user_namespace *user_ns)
+int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func, struct ima_namespace *ns)
 {
 	if (!ima_appraise)
 		return 0;
 
-	return ima_match_policy(inode, func, mask, IMA_APPRAISE, user_ns);
+	return ima_match_policy(inode, func, mask, IMA_APPRAISE, ns);
 }
 
 static int ima_fix_xattr(struct dentry *dentry,
@@ -325,7 +325,7 @@ void ima_inode_post_setattr(struct dentry *dentry)
 		return;
 
 	/* Modified by Yuqiong: temporary fix for appraise */
-	must_appraise = ima_must_appraise(inode, MAY_ACCESS, POST_SETATTR, current_user_ns());
+	must_appraise = ima_must_appraise(inode, MAY_ACCESS, POST_SETATTR, get_current_ns());
 	iint = integrity_iint_find(inode);
 	if (iint) {
 		iint->flags &= ~(IMA_APPRAISE | IMA_APPRAISED |

@@ -192,7 +192,7 @@ const char *ima_d_path(struct path *path, char **pathbuf);
 enum ima_hooks { FILE_CHECK = 1, MMAP_CHECK, BPRM_CHECK, MODULE_CHECK, FIRMWARE_CHECK, POST_SETATTR };
 
 int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
-		     int flags, struct user_namespace *user_ns);
+		     int flags, struct ima_namespace *ns);
 void ima_init_policy(void);
 void ima_update_policy(struct ima_namespace *);
 void ima_update_policy_flag(struct ima_namespace *);
@@ -211,7 +211,7 @@ int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 			     struct file *file, const unsigned char *filename,
 			     struct evm_ima_xattr_data *xattr_value,
 			     int xattr_len, int opened);
-int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func, struct user_namespace *user_ns);
+int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func, struct ima_namespace *ns);
 void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file);
 enum integrity_status ima_get_cache_status(struct integrity_iint_cache *iint,
 					   int func);

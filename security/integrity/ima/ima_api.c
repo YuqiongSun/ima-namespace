@@ -214,7 +214,7 @@ int ima_get_action(struct inode *inode, int mask, int function, struct ima_names
 
 	flags &= ns->ima_policy_flag;
 
-	return ima_match_policy(inode, function, mask, flags, ns->user_ns);
+	return ima_match_policy(inode, function, mask, flags, ns);
 }
 
 /*
