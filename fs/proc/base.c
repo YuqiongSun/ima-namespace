@@ -2497,6 +2497,39 @@ static int proc_ima_policy_release(struct inode *inode, struct file *file)
 	return ret;
 }
 
+static int proc_ima_keyring(struct seq_file *m, struct pid_namespace *ns,
+			    struct pid *pid, struct task_struct *task)
+{
+	struct ima_namespace *ima_ns;
+
+        rcu_read_lock();
+	ima_ns = task->nsproxy->ima_ns;
+	rcu_read_unlock();
+
+	seq_printf(m, "%-10s %-15s\n", "Module", "Keyring");
+	seq_printf(m, "%-10s %-15s\n", "ima", ima_ns->ima_keyring);
+
+/*
+	if (ima_ns == &init_ima_ns) {
+#ifndef CONFIG_IMA_TRUSTED_KEYRING
+		seq_printf(m, "%-10s %-15s\n\n", "ima", "_ima");
+#else
+		seq_printf(m, "%-10s %-15s\n\n", "ima", ".ima");
+#endif
+	}else{
+		printk(KERN_DEBUG "SYQ: I am here\n");
+#ifndef CONFIG_IMA_TRUSTED_KEYRING
+		sprintf(buf, "_ima_%08x", ima_ns->random);
+#else
+		sprintf(buf, ".ima_%08x", ima_ns->random);
+#endif
+		seq_printf(m, "%-10s %-15s\n", "ima", buf);
+		printk(KERN_DEBUG "SYQ: buf is %s\n", buf);
+	}
+*/
+	return 0;
+}
+
 static int proc_id_map_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq = file->private_data;
@@ -2535,6 +2568,7 @@ static const struct file_operations proc_ima_policy_operations = {
 	.llseek		= generic_file_llseek,
 	.release	= proc_ima_policy_release,
 };
+
 
 static const struct file_operations proc_gid_map_operations = {
 	.open		= proc_gid_map_open,
@@ -2718,6 +2752,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 * IMA policy can only be written once, and only be be written to exactly one process within the namespace
 */
 	REG("ima_policy",    S_IWUSR, proc_ima_policy_operations),
+	ONE("ima_keyring", S_IRUGO, proc_ima_keyring),
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	REG("timers",	  S_IRUGO, proc_timers_operations),
 #endif

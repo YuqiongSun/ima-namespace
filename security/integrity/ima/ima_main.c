@@ -199,7 +199,7 @@ static int process_measurement(struct file *file, int mask, int function,
 	bool violation_check;
 	struct ns_status *status;
 	struct ima_namespace *ns = get_current_ns();
-	
+	bool already_appraised = false;
 	// DELETE THIS
 	//char *mnt_path;
 	//char *temp_path;
@@ -210,6 +210,10 @@ static int process_measurement(struct file *file, int mask, int function,
 		pathbuf = NULL;
 		action = 0;
 		status = NULL;
+		xattr_value = NULL;
+		xattr_ptr = NULL;
+		xattr_len = 0;
+		violation_check = 0;
 
 		if (!ns->ima_policy_flag || !S_ISREG(inode->i_mode))
 			continue;
@@ -225,7 +229,10 @@ static int process_measurement(struct file *file, int mask, int function,
 		if (!action && !violation_check)
 			continue;
 
-		must_appraise = action & IMA_APPRAISE;
+		if (!already_appraised)
+			must_appraise = action & IMA_APPRAISE;
+		else
+			must_appraise = 0;
 
 		/*  Is the appraise rule hook specific?  */
 		if (action & IMA_FILE_APPRAISE)
@@ -279,8 +286,8 @@ static int process_measurement(struct file *file, int mask, int function,
 		/* Nothing to do, just return existing appraised status */
 		if (!action) {
 			if (must_appraise)
-				rc = ima_get_cache_status(iint, function);
-			if ((mask & MAY_WRITE) && (iint->flags & IMA_DIGSIG))
+				rc = ima_get_cache_status(status, function);
+			if ((mask & MAY_WRITE) && (status->flags & IMA_DIGSIG))
 				rc = -EACCES;
 			mutex_unlock(&inode->i_mutex);
 			kfree(xattr_value);
@@ -300,7 +307,7 @@ static int process_measurement(struct file *file, int mask, int function,
 			if (file->f_flags & O_DIRECT)
 				rc = (iint->flags & IMA_PERMIT_DIRECTIO) ? 0 : -EACCES;
 		
-			if ((mask & MAY_WRITE) && (iint->flags & IMA_DIGSIG))
+			if ((mask & MAY_WRITE) && (status->flags & IMA_DIGSIG))
 				rc = -EACCES;
 
 			mutex_unlock(&inode->i_mutex);
@@ -322,13 +329,15 @@ static int process_measurement(struct file *file, int mask, int function,
 		if (action & IMA_MEASURE)
 			ima_store_measurement(iint, file, pathname,
 					      xattr_value, xattr_len, ns, status);
-		if (action & IMA_APPRAISE_SUBMASK)
+		if ((action & IMA_APPRAISE_SUBMASK) && !already_appraised) {
 			rc = ima_appraise_measurement(function, iint, file, pathname,
-						      xattr_value, xattr_len, opened);
+						      xattr_value, xattr_len, opened, ns, status);
+			already_appraised = true;
+		}
 		if (action & IMA_AUDIT)
 			ima_audit_measurement(iint, pathname, status);
 	
-		if ((mask & MAY_WRITE) && (iint->flags & IMA_DIGSIG))
+		if ((mask & MAY_WRITE) && (status->flags & IMA_DIGSIG))
 			rc = -EACCES;
 		kfree(xattr_value);
 		mutex_unlock(&inode->i_mutex);

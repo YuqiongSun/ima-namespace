@@ -15,6 +15,7 @@
 #include <crypto/hash_info.h>
 
 #include "ima_template_lib.h"
+#include <linux/ima_namespace.h>
 
 static bool ima_template_hash_algo_allowed(u8 algo)
 {
@@ -37,6 +38,7 @@ static int ima_write_template_field_data(const void *data, const u32 datalen,
 {
 	u8 *buf, *buf_ptr;
 	u32 buflen = datalen;
+
 
 	if (datafmt == DATA_FMT_STRING)
 		buflen = datalen + 1;

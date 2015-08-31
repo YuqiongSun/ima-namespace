@@ -33,30 +33,31 @@ static const char *keyring_name[INTEGRITY_KEYRING_MAX] = {
 #endif
 };
 
-int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
+int integrity_digsig_verify(const char *ima_keyring_name, const char *sig, int siglen,
 			    const char *digest, int digestlen)
 {
+	struct key *keyring;
+	
+	/*
 	if (id >= INTEGRITY_KEYRING_MAX)
 		return -EINVAL;
+	*/
 
-	if (!keyring[id]) {
-		keyring[id] =
-			request_key(&key_type_keyring, keyring_name[id], NULL);
-		if (IS_ERR(keyring[id])) {
-			int err = PTR_ERR(keyring[id]);
-			pr_err("no %s keyring: %d\n", keyring_name[id], err);
-			keyring[id] = NULL;
-			return err;
-		}
+	keyring = request_key(&key_type_keyring, ima_keyring_name, NULL);
+	if (IS_ERR(keyring)) {
+		int err = PTR_ERR(keyring);
+		pr_err("no %s keyring: %d\n", ima_keyring_name, err);
+		keyring = NULL;
+		return err;
 	}
 
 	switch (sig[1]) {
 	case 1:
 		/* v1 API expect signature without xattr type */
-		return digsig_verify(keyring[id], sig + 1, siglen - 1,
+		return digsig_verify(keyring, sig + 1, siglen - 1,
 				     digest, digestlen);
 	case 2:
-		return asymmetric_verify(keyring[id], sig, siglen,
+		return asymmetric_verify(keyring, sig, siglen,
 					 digest, digestlen);
 	}
 

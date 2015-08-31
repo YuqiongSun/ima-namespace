@@ -13,6 +13,7 @@
 #define IMA_HASH_BITS 9
 #endif
 #define IMA_MEASURE_HTABLE_SIZE (1 << IMA_HASH_BITS)
+#define IMA_KEYRING_NAME_SIZE 104  /* maximum nested layers: 10*/
 
 struct ima_h_table{
 	atomic_long_t len;	/* number of stored measurements in the list */
@@ -34,6 +35,7 @@ struct ima_namespace{
 	struct list_head ima_policy_rules;
 	struct list_head iint_list;
 	int nr_extents;
+	unsigned char ima_keyring[IMA_KEYRING_NAME_SIZE];
 	unsigned long ima_fs_flags;	/* ima_policy file avaiability*/
 	int ima_policy_flag;		/* for policy quick check */
 	struct ima_h_table ima_htable;

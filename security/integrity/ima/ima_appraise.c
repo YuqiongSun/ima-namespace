@@ -69,65 +69,65 @@ static int ima_fix_xattr(struct dentry *dentry,
 }
 
 /* Return specific func appraised cached result */
-enum integrity_status ima_get_cache_status(struct integrity_iint_cache *iint,
+enum integrity_status ima_get_cache_status(struct ns_status *status,
 					   int func)
 {
 	switch (func) {
 	case MMAP_CHECK:
-		return iint->ima_mmap_status;
+		return status->ima_mmap_status;
 	case BPRM_CHECK:
-		return iint->ima_bprm_status;
+		return status->ima_bprm_status;
 	case MODULE_CHECK:
-		return iint->ima_module_status;
+		return status->ima_module_status;
 	case FIRMWARE_CHECK:
-		return iint->ima_firmware_status;
+		return status->ima_firmware_status;
 	case FILE_CHECK:
 	default:
-		return iint->ima_file_status;
+		return status->ima_file_status;
 	}
 }
 
-static void ima_set_cache_status(struct integrity_iint_cache *iint,
-				 int func, enum integrity_status status)
+static void ima_set_cache_status(int func, enum integrity_status status,
+				 struct ns_status *ns_status)
 {
 	switch (func) {
 	case MMAP_CHECK:
-		iint->ima_mmap_status = status;
+		ns_status->ima_mmap_status = status;
 		break;
 	case BPRM_CHECK:
-		iint->ima_bprm_status = status;
+		ns_status->ima_bprm_status = status;
 		break;
 	case MODULE_CHECK:
-		iint->ima_module_status = status;
+		ns_status->ima_module_status = status;
 		break;
 	case FIRMWARE_CHECK:
-		iint->ima_firmware_status = status;
+		ns_status->ima_firmware_status = status;
 		break;
 	case FILE_CHECK:
 	default:
-		iint->ima_file_status = status;
+		ns_status->ima_file_status = status;
 		break;
 	}
 }
 
-static void ima_cache_flags(struct integrity_iint_cache *iint, int func)
+static void ima_cache_flags(struct integrity_iint_cache *iint, int func, struct ns_status *status)
 {
 	switch (func) {
 	case MMAP_CHECK:
-		iint->flags |= (IMA_MMAP_APPRAISED | IMA_APPRAISED);
+		status->flags |= (IMA_MMAP_APPRAISED | IMA_APPRAISED);
 		break;
 	case BPRM_CHECK:
-		iint->flags |= (IMA_BPRM_APPRAISED | IMA_APPRAISED);
+		status->flags |= (IMA_BPRM_APPRAISED | IMA_APPRAISED);
 		break;
 	case MODULE_CHECK:
-		iint->flags |= (IMA_MODULE_APPRAISED | IMA_APPRAISED);
+		status->flags |= (IMA_MODULE_APPRAISED | IMA_APPRAISED);
 		break;
 	case FIRMWARE_CHECK:
-		iint->flags |= (IMA_FIRMWARE_APPRAISED | IMA_APPRAISED);
+		status->flags |= (IMA_FIRMWARE_APPRAISED | IMA_APPRAISED);
 		break;
 	case FILE_CHECK:
 	default:
-		iint->flags |= (IMA_FILE_APPRAISED | IMA_APPRAISED);
+		status->flags |= (IMA_FILE_APPRAISED | IMA_APPRAISED);
 		break;
 	}
 }
@@ -187,7 +187,8 @@ int ima_read_xattr(struct dentry *dentry,
 int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 			     struct file *file, const unsigned char *filename,
 			     struct evm_ima_xattr_data *xattr_value,
-			     int xattr_len, int opened)
+			     int xattr_len, int opened, struct ima_namespace *ns,
+			     struct ns_status *ns_status)
 {
 	static const char op[] = "appraise_data";
 	char *cause = "unknown";
@@ -206,7 +207,7 @@ int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 		cause = "missing-hash";
 		status = INTEGRITY_NOLABEL;
 		if (opened & FILE_CREATED) {
-			iint->flags |= IMA_NEW_FILE;
+			ns_status->flags |= IMA_NEW_FILE;
 			status = INTEGRITY_PASS;
 		}
 		goto out;
@@ -226,7 +227,7 @@ int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 		/* first byte contains algorithm id */
 		hash_start = 1;
 	case IMA_XATTR_DIGEST:
-		if (iint->flags & IMA_DIGSIG_REQUIRED) {
+		if (ns_status->flags & IMA_DIGSIG_REQUIRED) {
 			cause = "IMA-signature-required";
 			status = INTEGRITY_FAIL;
 			break;
@@ -249,8 +250,8 @@ int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 		status = INTEGRITY_PASS;
 		break;
 	case EVM_IMA_XATTR_DIGSIG:
-		iint->flags |= IMA_DIGSIG;
-		rc = integrity_digsig_verify(INTEGRITY_KEYRING_IMA,
+		ns_status->flags |= IMA_DIGSIG;
+		rc = integrity_digsig_verify(ns->ima_keyring,
 					     (const char *)xattr_value, rc,
 					     iint->ima_hash->digest,
 					     iint->ima_hash->length);
@@ -274,15 +275,15 @@ out:
 		if ((ima_appraise & IMA_APPRAISE_FIX) &&
 		    (!xattr_value ||
 		     xattr_value->type != EVM_IMA_XATTR_DIGSIG)) {
-			if (!ima_fix_xattr(dentry, iint))
+			if (!ima_fix_xattr(dentry, iint)) 
 				status = INTEGRITY_PASS;
 		}
 		integrity_audit_msg(AUDIT_INTEGRITY_DATA, inode, filename,
 				    op, cause, rc, 0);
 	} else {
-		ima_cache_flags(iint, func);
+		ima_cache_flags(iint, func, ns_status);
 	}
-	ima_set_cache_status(iint, func, status);
+	ima_set_cache_status(func, status, ns_status);
 	return status;
 }
 

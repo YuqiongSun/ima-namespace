@@ -107,11 +107,6 @@ struct integrity_iint_cache {
 	u64 version;		/* track inode changes */
 	unsigned long flags;
 	struct list_head ns_list; /* list head for all namespaces */
-	enum integrity_status ima_file_status:4;
-	enum integrity_status ima_mmap_status:4;
-	enum integrity_status ima_bprm_status:4;
-	enum integrity_status ima_module_status:4;
-	enum integrity_status ima_firmware_status:4;
 	enum integrity_status evm_status:4;
 	struct ima_digest_data *ima_hash;
 };
@@ -133,14 +128,14 @@ int __init integrity_read_file(const char *path, char **data);
 
 #ifdef CONFIG_INTEGRITY_SIGNATURE
 
-int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
+int integrity_digsig_verify(const char *ima_keyring_name, const char *sig, int siglen,
 			    const char *digest, int digestlen);
 
 int __init integrity_init_keyring(const unsigned int id);
 int __init integrity_load_x509(const unsigned int id, const char *path);
 #else
 
-static inline int integrity_digsig_verify(const unsigned int id,
+static inline int integrity_digsig_verify(const char *ima_keyring_name,
 					  const char *sig, int siglen,
 					  const char *digest, int digestlen)
 {
