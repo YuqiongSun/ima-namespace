@@ -25,7 +25,6 @@
 
 #include "ima.h"
 
-#include <linux/ima_namespace.h>
 
 static int valid_policy = 1;
 #define TMPBUFLEN 12

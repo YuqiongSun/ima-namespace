@@ -29,10 +29,6 @@
 
 #include "ima.h"
 
-/*
-* Modified by Yuqiong
-*/
-#include <linux/ima_namespace.h>
 
 int ima_initialized;
 
@@ -175,7 +171,7 @@ void ima_file_free(struct file *file)
 	else
 		ns = get_current_ns();
 
-	if (!ns->ima_policy_flag || !S_ISREG(inode->i_mode))
+	if (!ns || !ns->ima_policy_flag || !S_ISREG(inode->i_mode))
 		return;
 	
 	iint = integrity_iint_find(inode);

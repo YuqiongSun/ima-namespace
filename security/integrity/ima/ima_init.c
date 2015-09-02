@@ -24,7 +24,6 @@
 #include <crypto/hash_info.h>
 #include "ima.h"
 
-#include <linux/ima_namespace.h>
 
 /* name for boot aggregate entry */
 static const char *boot_aggregate_name = "boot_aggregate";

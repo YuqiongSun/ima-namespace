@@ -23,10 +23,6 @@
 #include <crypto/hash_info.h>
 #include "ima.h"
 
-/*
-* Modified by Yuqiong
-*/
-#include <linux/ima_namespace.h>
 
 /*
  * ima_free_template_entry - free an existing template entry

@@ -12,6 +12,7 @@
 #include <linux/key.h>
 #include <linux/key-type.h>
 
+
 extern struct list_head ima_default_rules;
 
 struct ima_namespace init_ima_ns = {
@@ -43,6 +44,7 @@ struct ima_namespace init_ima_ns = {
 };
 EXPORT_SYMBOL(init_ima_ns);
 
+static DEFINE_MUTEX(key_user_keyring_mutex);
 
 static struct ima_namespace *create_ima_ns(void)
 {
@@ -65,8 +67,11 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 	//key_ref_t ima_keyring_parent_ref;
 	struct key *key;
 	//char parent_keyring[IMA_KEYRING_NAME_SIZE + 2];
-
+	struct key *uid_keyring;
+	char buf[20];
 	const struct cred *cred = current_cred();
+	//struct user_namespace **user_ns_ptr = &user_ns;
+	//const struct cred *cred = container_of(user_ns_ptr, struct cred, user_ns);
 
         ns = create_ima_ns();
         if (!ns)
@@ -89,9 +94,22 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 				| KEY_USR_ALL, KEY_ALLOC_IN_QUOTA, 
 				NULL);
 */
+	mutex_lock(&key_user_keyring_mutex);
 	if (!cred->user->uid_keyring) {
 		pr_info("SYQ: user keyring doesn't exist\n");
-		goto error;
+		sprintf(buf, "_uid.%u", cred->user->uid);
+		pr_info("SYQ:%s\n",buf);
+		uid_keyring = keyring_alloc(buf, cred->user->uid, INVALID_GID, 
+					    cred, (KEY_POS_ALL & ~KEY_POS_SETATTR) | 
+					    KEY_USR_ALL, KEY_ALLOC_IN_QUOTA, NULL);
+		if (IS_ERR(uid_keyring)) {
+			err = PTR_ERR(uid_keyring);
+			pr_info("SYQ: cannot create user keyring\n");
+			mutex_unlock(&key_user_keyring_mutex);
+			goto error;
+		}
+		cred->user->uid_keyring = uid_keyring;
+		key_link(cred->session_keyring, uid_keyring);
 	}
 
 	key = cred->user->uid_keyring;
@@ -100,6 +118,7 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 	if (IS_ERR(keyring_ref)) {
 		err = PTR_ERR(keyring_ref);
 		pr_info("SYQ: Can't find user keyring\n");
+		mutex_unlock(&key_user_keyring_mutex);
 		goto error;
 	}
 
@@ -108,8 +127,12 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 	if (IS_ERR(ima_keyring_ref)) {
 		err = PTR_ERR(ima_keyring_ref);
 		pr_info("SYQ: Can't allocate %s keyring (%d)\n", ns->ima_keyring, err);
+		key_ref_put(keyring_ref);
+		mutex_unlock(&key_user_keyring_mutex);
 		goto error;
 	}
+	mutex_unlock(&key_user_keyring_mutex);
+	ns->keyring[0] = key_ref_to_ptr(ima_keyring_ref);
 
 /*
 	sprintf(parent_keyring, "%s%s", "p_", ns->ima_keyring);
@@ -139,8 +162,12 @@ static struct ima_namespace *clone_ima_ns(struct user_namespace *user_ns,
 	//ns->ima_htable.queue[0 ... IMA_MEASURE_HTABLE_SIZE - 1] = HLIST_HEAD_INIT;
 	for (i=0; i<IMA_MEASURE_HTABLE_SIZE; i++)
 		INIT_HLIST_HEAD(&ns->ima_htable.queue[i]);
-	ima_update_policy_flag(ns);	
+	ima_update_policy_flag(ns);
+	
+	key_ref_put(ima_keyring_ref);	
+	key_ref_put(keyring_ref);
 	return ns;
+
 error:
 	kfree(ns);
 	return ERR_PTR(err);
@@ -178,12 +205,13 @@ static void destroy_ima_ns(struct ima_namespace *ns)
 	 * 
 	 */
 	ima_keyring = request_key(&key_type_keyring, ns->ima_keyring, NULL);	
-	if (ima_keyring)
+	if (!IS_ERR(ima_keyring)) {
 		keyring_clear(ima_keyring);
-	user_keyring = cred->user->uid_keyring;
-	if (user_keyring) {
-		key_unlink(user_keyring, ima_keyring);
-		key_put(user_keyring);
+		user_keyring = cred->user->uid_keyring;
+		if (user_keyring) {
+			key_unlink(user_keyring, ima_keyring);
+			//key_put(user_keyring);
+		}
 	}
         /*
 	* Free all the allocated data structures for integrity

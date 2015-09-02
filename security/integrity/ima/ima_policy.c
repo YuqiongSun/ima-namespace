@@ -20,8 +20,6 @@
 
 #include "ima.h"
 
-/* Modified by Yuqiong*/
-#include <linux/ima_namespace.h>
 
 /* flags definitions */
 #define IMA_FUNC	0x0001

@@ -23,6 +23,12 @@
 
 static struct key *keyring[INTEGRITY_KEYRING_MAX];
 
+/* Make the native _ima or .ima keyring searchable
+ * TODO: add cache for all namespace keyrings so that they 
+ * are searchable by all users. 
+ */
+static struct key *init_ima_keyring;
+
 static const char *keyring_name[INTEGRITY_KEYRING_MAX] = {
 	"_evm",
 	"_module",
@@ -33,31 +39,42 @@ static const char *keyring_name[INTEGRITY_KEYRING_MAX] = {
 #endif
 };
 
-int integrity_digsig_verify(const char *ima_keyring_name, const char *sig, int siglen,
+int integrity_digsig_verify(struct ima_namespace *ns, const char *sig, int siglen,
 			    const char *digest, int digestlen)
 {
-	struct key *keyring;
+	struct key *ima_keyring;
 	
 	/*
 	if (id >= INTEGRITY_KEYRING_MAX)
 		return -EINVAL;
 	*/
 
-	keyring = request_key(&key_type_keyring, ima_keyring_name, NULL);
-	if (IS_ERR(keyring)) {
-		int err = PTR_ERR(keyring);
-		pr_err("no %s keyring: %d\n", ima_keyring_name, err);
-		keyring = NULL;
-		return err;
-	}
+	if (ns!=&init_ima_ns)
+		pr_info("SYQ: i am here sign\n");
+	if (!ns->keyring[0]) {
 
+	if (ns!=&init_ima_ns)
+		pr_info("SYQ: i am here no key found\n");
+		ima_keyring = request_key(&key_type_keyring, ns->ima_keyring, NULL);
+		if (IS_ERR(ima_keyring)) {
+			int err = PTR_ERR(ima_keyring);
+			pr_err("no %s keyring: %d\n", ns->ima_keyring, err);
+			ima_keyring = NULL;
+			return err;
+		}
+		ns->keyring[0] = ima_keyring;
+	}
 	switch (sig[1]) {
 	case 1:
+	if (ns!=&init_ima_ns)
+		pr_info("SYQ: i am here case 1 \n");
 		/* v1 API expect signature without xattr type */
-		return digsig_verify(keyring, sig + 1, siglen - 1,
+		return digsig_verify(ns->keyring[0], sig + 1, siglen - 1,
 				     digest, digestlen);
 	case 2:
-		return asymmetric_verify(keyring, sig, siglen,
+	if (ns!=&init_ima_ns)
+		pr_info("SYQ: i am here case 2\n");
+		return asymmetric_verify(ns->keyring[0], sig, siglen,
 					 digest, digestlen);
 	}
 

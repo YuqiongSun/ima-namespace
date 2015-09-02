@@ -15,7 +15,6 @@
 #include <crypto/hash_info.h>
 
 #include "ima_template_lib.h"
-#include <linux/ima_namespace.h>
 
 static bool ima_template_hash_algo_allowed(u8 algo)
 {

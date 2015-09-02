@@ -15,6 +15,7 @@
 #include <linux/integrity.h>
 #include <crypto/sha.h>
 #include <linux/key.h>
+#include <linux/ima_namespace.h>
 
 /* iint action cache flags */
 #define IMA_MEASURE		0x00000001
@@ -128,14 +129,14 @@ int __init integrity_read_file(const char *path, char **data);
 
 #ifdef CONFIG_INTEGRITY_SIGNATURE
 
-int integrity_digsig_verify(const char *ima_keyring_name, const char *sig, int siglen,
+int integrity_digsig_verify(struct ima_namespace *ns, const char *sig, int siglen,
 			    const char *digest, int digestlen);
 
 int __init integrity_init_keyring(const unsigned int id);
 int __init integrity_load_x509(const unsigned int id, const char *path);
 #else
 
-static inline int integrity_digsig_verify(const char *ima_keyring_name,
+static inline int integrity_digsig_verify(struct ima_namespace *ns,
 					  const char *sig, int siglen,
 					  const char *digest, int digestlen)
 {

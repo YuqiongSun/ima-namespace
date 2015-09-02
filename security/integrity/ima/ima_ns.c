@@ -2,7 +2,6 @@
  * Author: Yuqiong Sun <suny@us.ibm.com>
 */
 
-#include <linux/ima_namespace.h>
 #include <linux/slab.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
